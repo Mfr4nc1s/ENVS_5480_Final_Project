@@ -1,0 +1,83 @@
+```{r}
+##install packages and run libraries
+
+install.packages("future")
+install.packages("Rsagacmd")
+install.packages("lidR")
+install.packages("units")
+library(units)
+library(lidR)
+library(future)
+library(terra)
+library(mapview)
+library(bcdata)
+library(bcmaps)
+library(tidyverse)
+library(Rsagacmd)
+```
+
+```{r}
+##bring las file in
+
+lasfile<- "LacDuBois.las"
+# las <- readLAS(lasfile)
+las_ctg <- readLAScatalog("lacDuBois.las")
+
+## perform a retiling to allow for parralel processing and core assignment to
+## make the process more efficient, exactly the same as in the seminar
+
+n_cores <- availableCores()
+plan(multisession, workers = n_cores)
+
+opt_output_files(las_ctg) <- "01_retile/{XLEFT}_{YBOTTOM}"
+
+##Chunk size and buffer size:
+
+opt_chunk_size(las_ctg) <- 250
+opt_chunk_buffer(las_ctg) <- 0
+
+##Chunk alignment
+
+opt_chunk_alignment(las_ctg) <- c(250, 250)
+plot(las_ctg, chunk_pattern = TRUE)
+
+##retile
+
+ctg_tiled <- catalog_retile(las_ctg)
+View(ctg_tiled)
+plot(ctg_tiled, mapview = TRUE)
+
+##Catalog options are carried over from one processed catalog to the next,
+##so we need to reset the filter to ensure that we don't further filter
+##the catalog:
+
+opt_filter(ctg_tiled) <- ""
+
+##Reset chunk size to 0 - we don't need to perform retiling here because
+##that is done, so reset chunk size to 0 to prevent further retiling
+
+opt_chunk_size(ctg_tiled) <- 0
+
+##Set a 15m chunk buffer to load in 15m of the surrounding tiles
+
+opt_chunk_buffer(ctg_tiled) <- 15
+
+## Specify output path to be in a folder named "ground". The {*} is an indicator
+## to keep the original file name, which will be the tiled file name:
+
+opt_output_files(ctg_tiled) <- "02_ground/{*}"
+
+##Now, do the ground point classification:
+
+ctg_ground <- classify_ground(ctg_tiled, algorithm = csf(sloop_smooth = TRUE))
+opt_output_files(ctg_ground) <- ""
+dem <- rasterize_terrain(ctg_ground, res = 1, algorithm = tin())
+
+##Create a new folder called "ta" to hold all of the files used for terrain
+##analysis:
+
+dir.create("ta", showWarnings = FALSE)
+dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
+```
+
+
