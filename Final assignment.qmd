@@ -82,7 +82,6 @@ dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
 
 
 
-
 ```{r}
 library(terra)
 library(mapview)
@@ -173,4 +172,3 @@ openness <- saga$ta_lighting$topographic_openness(
 ```{r}
 ## determine canopy height model
 ```
-
