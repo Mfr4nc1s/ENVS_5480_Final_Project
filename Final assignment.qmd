@@ -81,3 +81,94 @@ dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
 ```
 
 
+
+```{r}
+library(terra)
+library(mapview)
+
+dem <- rast("DEMs/dem.tif")
+plot(dem)
+
+#mapview(dem)
+
+
+## extract terrain layers
+
+saga_path <- "C:/Users/T00629284/OneDrive - Thompson Rivers University/Desktop/saga-9.3.2_x64/saga_cmd.exe"
+saga <- saga_gis(saga_path, raster_format = "GeoTIFF")
+#dem = rast("ta/dem.tif")
+ 
+dem_preproc <- saga$ta_preprocessor$sink_removal(
+  dem = dem, 
+  dem_preproc = "DEMs/dem_preproc.tif",
+  #dem_preproc = "ta/dem_preproc.tif"
+  )
+
+sources(dem_preproc)
+
+plot(dem_preproc)
+
+## determine slope & aspect
+ 
+saga$ta_morphometry$slope_aspect_curvature
+ 
+View(tidy(saga$ta_morphometry$slope_aspect_curvature))
+ 
+slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
+  elevation = dem_preproc, 
+  slope = "DEMs/slope.tif", 
+  aspect = "DEMs/aspect.tif", 
+  method = 6, 
+  unit_slope = "radians", 
+  unit_aspect = "radians",
+  .all_outputs = FALSE
+  )
+
+## determine MRVBF
+ 
+mrvbf_thresh <- mrvbf_threshold(res = res(dem)[1])
+mrvbf <- saga$ta_morphometry$multiresolution_index_of_valley_bottom_flatness_mrvbf(
+  dem = dem_preproc, 
+  mrvbf = "DEMs/mrvbf.tif",
+  mrrtf = "DEMs/mrrtf.tif", 
+  t_slope = mrvbf_thresh
+  )
+
+## determine TRI
+ 
+tri <- saga$ta_morphometry$terrain_ruggedness_index_tri(
+  dem = dem_preproc, tri = "DEMs/tri.tif")
+
+##  determine TWI
+ 
+tca <- saga$ta_hydrology$flow_accumulation_top_down(
+  elevation = dem_preproc, flow = "DEMs/tca_TEMP.tif", .all_outputs = FALSE)
+ 
+sca <- saga$ta_hydrology$flow_width_and_specific_catchment_area(
+  dem = dem_preproc, tca = tca, sca = "DEMs/sca_TEMP.tif", .all_outputs = FALSE)
+ 
+twi <- saga$ta_hydrology$topographic_wetness_index(
+  slope = slope_aspect$slope, area = sca, twi = "DEMs/twi.tif")
+
+## determine TPI
+
+tpi <- saga$ta_morphometry$topographic_position_index_tpi(
+  dem = dem_preproc, 
+  tpi = "DEMs/tpi.tif"
+)
+
+## determine topographic openess
+
+# Topographic openness
+openness <- saga$ta_lighting$topographic_openness(
+  dem = dem_preproc, 
+  pos = "DEMs/openness_pos.tif", 
+  neg = "DEMs/openness_neg.tif"
+  )
+
+```
+
+
+```{r}
+## determine canopy height model
+```
