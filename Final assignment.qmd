@@ -1,10 +1,10 @@
 ```{r}
 ##install packages and run libraries
 
-#install.packages("future")
-#install.packages("Rsagacmd")
-#install.packages("lidR")
-#install.packages("units")
+install.packages("future")
+install.packages("Rsagacmd")
+install.packages("lidR")
+install.packages("units")
 library(units)
 library(lidR)
 library(future)
@@ -26,14 +26,14 @@ las_ctg <- readLAScatalog("lacDuBois.las")
 ## perform a retiling to allow for parralel processing and core assignment to
 ## make the process more efficient, exactly the same as in the seminar
 
-n_cores <- availableCores() /2
+n_cores <- availableCores()
 plan(multisession, workers = n_cores)
 
 opt_output_files(las_ctg) <- "01_retile/{XLEFT}_{YBOTTOM}"
 
 ##Chunk size and buffer size:
 
-opt_chunk_size(las_ctg) <- 500
+opt_chunk_size(las_ctg) <- 250
 opt_chunk_buffer(las_ctg) <- 0
 
 ##Chunk alignment
@@ -86,7 +86,7 @@ dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
 ```{r}
 library(terra)
 library(mapview)
-# Mohsin's code
+
 dem <- rast("DEMs/dem.tif")
 plot(dem)
 
