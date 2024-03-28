@@ -1,0 +1,184 @@
+```{r}
+##install packages and run libraries
+
+install.packages("future")
+install.packages("Rsagacmd")
+install.packages("lidR")
+install.packages("units")
+library(units)
+library(lidR)
+library(future)
+library(terra)
+library(mapview)
+library(bcdata)
+library(bcmaps)
+library(tidyverse)
+library(Rsagacmd)
+```
+
+```{r}
+##bring las file in
+
+lasfile<- "LacDuBois.las"
+# las <- readLAS(lasfile)
+las_ctg <- readLAScatalog("lacDuBois.las")
+
+## perform a retiling to allow for parralel processing and core assignment to
+## make the process more efficient, exactly the same as in the seminar
+
+n_cores <- availableCores()
+plan(multisession, workers = n_cores)
+
+opt_output_files(las_ctg) <- "01_retile/{XLEFT}_{YBOTTOM}"
+
+##Chunk size and buffer size:
+
+opt_chunk_size(las_ctg) <- 250
+opt_chunk_buffer(las_ctg) <- 0
+
+##Chunk alignment
+
+opt_chunk_alignment(las_ctg) <- c(250, 250)
+plot(las_ctg, chunk_pattern = TRUE)
+
+##retile
+
+ctg_tiled <- catalog_retile(las_ctg)
+View(ctg_tiled)
+plot(ctg_tiled, mapview = TRUE)
+
+##Catalog options are carried over from one processed catalog to the next,
+##so we need to reset the filter to ensure that we don't further filter
+##the catalog:
+
+opt_filter(ctg_tiled) <- ""
+
+##Reset chunk size to 0 - we don't need to perform retiling here because
+##that is done, so reset chunk size to 0 to prevent further retiling
+
+opt_chunk_size(ctg_tiled) <- 0
+
+##Set a 15m chunk buffer to load in 15m of the surrounding tiles
+
+opt_chunk_buffer(ctg_tiled) <- 15
+
+## Specify output path to be in a folder named "ground". The {*} is an indicator
+## to keep the original file name, which will be the tiled file name:
+
+opt_output_files(ctg_tiled) <- "02_ground/{*}"
+
+##Now, do the ground point classification:
+
+ctg_ground <- classify_ground(ctg_tiled, algorithm = csf(sloop_smooth = TRUE))
+opt_output_files(ctg_ground) <- ""
+dem <- rasterize_terrain(ctg_ground, res = 1, algorithm = tin())
+
+##Create a new folder called "ta" to hold all of the files used for terrain
+##analysis:
+
+dir.create("ta", showWarnings = FALSE)
+dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
+```
+
+```{r}
+library(terra)
+library(mapview)
+
+dem <- rast("DEMs/dem.tif")
+plot(dem)
+
+#mapview(dem)
+
+
+## extract terrain layers
+## reminder to change path back to microsoft
+##
+##saga_path <- "C:/Users/T00629284/OneDrive - Thompson Rivers University/Desktop/saga-9.3.2_x64/saga_cmd.exe"
+
+saga_path <- ("/Applications/SAGA.app/Contents/MacOS/saga_cmd")
+saga <- saga_gis(saga_path, raster_format = "GeoTIFF")
+#dem = rast("ta/dem.tif")
+ 
+dem_preproc <- saga$ta_preprocessor$sink_removal(
+  dem = dem, 
+  dem_preproc = "DEMs/dem_preproc.tif",
+  #dem_preproc = "ta/dem_preproc.tif"
+  )
+
+sources(dem_preproc)
+
+plot(dem_preproc)
+
+## determine slope & aspect
+ 
+saga$ta_morphometry$slope_aspect_curvature
+ 
+View(tidy(saga$ta_morphometry$slope_aspect_curvature))
+ 
+slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
+  elevation = dem_preproc, 
+  slope = "DEMs/slope.tif", 
+  aspect = "DEMs/aspect.tif", 
+  method = 6, 
+  unit_slope = "radians", 
+  unit_aspect = "radians",
+  .all_outputs = FALSE
+  )
+
+## determine MRVBF
+ 
+mrvbf_thresh <- mrvbf_threshold(res = res(dem)[1])
+mrvbf <- saga$ta_morphometry$multiresolution_index_of_valley_bottom_flatness_mrvbf(
+  dem = dem_preproc, 
+  mrvbf = "DEMs/mrvbf.tif",
+  mrrtf = "DEMs/mrrtf.tif", 
+  t_slope = mrvbf_thresh
+  )
+
+## determine TRI
+ 
+tri <- saga$ta_morphometry$terrain_ruggedness_index_tri(
+  dem = dem_preproc, tri = "DEMs/tri.tif")
+
+##  determine TWI
+ 
+tca <- saga$ta_hydrology$flow_accumulation_top_down(
+  elevation = dem_preproc, flow = "DEMs/tca_TEMP.tif", .all_outputs = FALSE)
+ 
+
+sca <- saga$ta_hydrology$flow_width_and_specific_catchment_area(
+  dem = dem_preproc, tca = tca, sca = "DEMs/sca_TEMP.tif", .all_outputs = FALSE)
+ 
+twi <- saga$ta_hydrology$topographic_wetness_index(
+  slope = slope_aspect$slope, area = sca, twi = "DEMs/twi.tif")
+
+## determine TPI
+
+tpi <- saga$ta_morphometry$topographic_position_index_tpi(
+  dem = dem_preproc, 
+  tpi = "DEMs/tpi.tif"
+)
+
+## determine topographic openess
+
+# Topographic openness
+openness <- saga$ta_lighting$topographic_openness(
+  dem = dem_preproc, 
+  pos = "DEMs/openness_pos.tif", 
+  neg = "DEMs/openness_neg.tif"
+  )
+
+```
+
+Question 5.
+
+```{r}
+model_layers <- c(slope_aspect$slope, slope_aspect$aspect, mrvbf$mrvbf, mrvbf$mrrf, tri, twi, tpi, openness$pos, openness$neg)
+
+poly <- st_read("LDB_SK.gpkg") %>% mutate(ID=row_number())
+vector <- vect(poly)
+
+extract_data <- terra::extract(model_layers, vector, ID=TRUE, RAW = TRUE) %>% as.data.frame()
+
+table_join <- left_join(poly, extract_data, by="ID")
+```
