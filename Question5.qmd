@@ -1,0 +1,55 @@
+---
+title: "Question 5"
+author: "Jasmine"
+format: html
+editor: visual
+---
+
+Packages needed
+
+```{r}
+library(terra)
+library(mapview)
+library(Rsagacmd)
+library(tidyverse)
+library(units)
+library(lidR)
+library(future)
+library(terra)
+library(mapview)
+library(bcdata)
+library(bcmaps)
+library(tidyverse)
+library(Rsagacmd)
+```
+
+Read in raster files
+
+```{r}
+#aspect <-rast("DEMs/aspect.tif")
+#slope <- rast("DEMs/slope.tif")
+#mrvbf<- rast("DEMs/mrvbf.tif")
+#mrrtf <- rast("DEMs/mrrtf.tif")
+#tri <- rast("DEMs/tri.tif")
+#twi <-rast("DEMs/twi.tif")
+#tpi <- rast("DEMs/tpi.tif")
+#neg_openness <- rast("DEMs/openness_neg.tif")
+#pos_openness <-rast("DEMs/openness_pos.tif")
+```
+
+Extract Data
+
+```{r}
+
+##model_layers <- c(slope, aspect, mrvbf, mrrtf, tri, twi, tpi)
+
+model_layers <- c(slope_aspect$slope, slope_aspect$aspect, mrvbf$mrvbf, mrvbf$mrrf, tri, twi, tpi, openness$pos, openness$neg)
+
+poly <- st_read("LDB_SK.gpkg") %>% mutate(ID=row_number())
+vector <- vect(poly)
+
+extract_data <- terra::extract(model_layers, vector, ID=TRUE, RAW = TRUE) %>% as.data.frame()
+
+table_join <- left_join(poly, extract_data, by="ID")
+
+```
