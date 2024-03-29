@@ -77,7 +77,7 @@ Train the learner using task data
 
 lrn_rf_tune <- lrn("classif.ranger", 
                    num.trees = to_tune(100, 2000), predict_type = "response??",
-                   mtry = to_tune(1, length(tsk_edit$feature_names??)),
+                   mtry = to_tune(1, length(tsk_sk$feature_names??)),
                    importance = "impurity")
 
 ```
@@ -88,7 +88,7 @@ Tuner design: Set up how the 'to_tune()' function will work
 
 df_design <- expand.grid(
   num.trees = c(100, 250, 500, 750, 1000, 1500, 2000),
-  mtry = 1:length(tsk_edit$feature_names))
+  mtry = 1:length(tsk_sk$feature_names))
 
 dt_design <- data.table(df_design)
 
@@ -151,7 +151,7 @@ Run Probability model
 # Probability learner
 lrn_rf_tune_prob <- lrn("classif.ranger", 
                         num.trees = to_tune(100, 2000), predict_type = "prob",
-                        mtry = to_tune(1, length(tsk_edit$feature_names)),
+                        mtry = to_tune(1, length(tsk_sk$feature_names)),
                         importance = "impurity")
 
 ##??
@@ -173,7 +173,7 @@ at_prob <- auto_tuner(
   terminator = trm("evals", n_evals = 5)
 )
 
-rr_prob <- resample(tsk_leipzig, at_prob, cv_outer, store_models = TRUE)
+rr_prob <- resample(tsk_sk, at_prob, cv_outer, store_models = TRUE)
 
 # Aggregate the final data to generate an overall score:
 rr_prob$aggregate(msrs(useful_msrs))
@@ -224,14 +224,14 @@ plan(multisession)
 best_lrn_prob$parallel_predict <- TRUE
 
 # Generate map prediction
-prediction_prob <- predict_spatial(leipzig_raster, best_lrn_prob)
+prediction_prob <- predict_spatial(sk_raster, best_lrn_prob)
 plot(prediction_prob)
 
 # Workaround for probability prediction
 ranger_model <- best_lrn_prob$model
 fun <- function(model, ...) predict(model, ...)$predictions
 prediction_prob_terra <- terra::predict(
-  leipzig_raster, ranger_model, fun = fun, na.rm = TRUE)
+  sk_raster, ranger_model, fun = fun, na.rm = TRUE)
 
 plot(prediction_prob_terra)
 
@@ -265,7 +265,7 @@ plan(multisession)
 best_lrn_regr$parallel_predict <- TRUE
 
 # Generate map prediction
-prediction_regr <- predict_spatial(leipzig_raster, best_lrn_regr)
+prediction_regr <- predict_spatial(sk_raster, best_lrn_regr)
 plot(prediction_regr)
 
 
