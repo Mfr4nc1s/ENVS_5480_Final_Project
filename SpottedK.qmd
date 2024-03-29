@@ -34,19 +34,30 @@ Question #5: extract value of raster at each point/line/polygon
 
 ```{r}
 ##load raster data
-rast_data <- system.file("extdata", "editraster.tif", package = "mlr3spatial")
-edit_raster <- rast(rast_data)
-edit_raster
-plot(edit_raster)
+## list all files with a .tif extension in the ta/DEMs folder
+rast_data <- list.files("ta/DEMs", pattern = ".tif", full.names = TRUE)
+
+# remove listed files that have either "_TEMP.tif" or "dem" in the name
+rast_data <- grep("_TEMP.tif|dem", rast_data, value = TRUE, invert = TRUE)
+
+# THIS IS TEMPORARY UNTIL THE LAYERS ARE FIXED: currently, the TPI, 
+# openness_pos, and openness_neg files are not the correct files, so remove
+# those as well:
+rast_data <- grep("openness_|tpi.tif", rast_data, value = TRUE, invert = TRUE)
+
+sk_raster <- rast(rast_data)
+sk_raster
+plot(sk_raster)
 
 ##load vector data & read in sf dataframe 
-vect_data <-system.file("extdata", "edit_points.gpkg", package = "mlr3spatial")
-edit_vector <- st_read(vect_data, stringsAsFactors = TRUE)
-edit_vector
+vect_data <-system.file("extdata", "LDB_SK.gpkg", package = "mlr3spatial") ##wrong?
+vect_data <- c(table_join, vector, package="mlr3spatial") ##use
+sk_vector <- st_read(vect_data, stringsAsFactors = TRUE)
+sk_vector
 
-##land_cover is what is predicted....change for our project
-tsk_edit <- as_task_classif_st(edit_vector, target = "land_cover??")
-tsk_edit
+##target is what is predicted
+tsk_sk <- as_task_classif_st(sk_vector, target = "sk_pres")
+tsk_sk
 ##created task
 
 ```
