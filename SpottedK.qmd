@@ -5,7 +5,6 @@ editor: visual
 ---
 
 ```{r}
-##add to Nicole branch
 ```
 
 #6
@@ -13,14 +12,13 @@ editor: visual
 ```{r}
 
 library(remotes)
-library(mlr3spatiotempcv)
 library(tidyverse)
 library(ranger) 
 library(mlr3verse)
 library(mlr3spatial)
 library(mlr3spatiotempcv)
 library(sf)
-library(terra, exclude = "resample")
+library(terra)
 library(future)
 
 lgr::get_logger("mlr3")$set_threshold("warn")
@@ -28,44 +26,74 @@ lgr::get_logger("bbotk")$set_threshold("warn")
 
 ```
 
-Read files in\
-points/polygons & raster imagery\
-Question #5: extract value of raster at each point/line/polygon
+Q#5
 
 ```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+library(sf)
+library(terra)
+library(dplyr)
+
 ##load raster data
-## list all files with a .tif extension in the ta/DEMs folder
-rast_data <- list.files("ta/DEMs", pattern = ".tif", full.names = TRUE)
+rast_files <- list.files("5m", pattern = ".tif", full.names = TRUE)
 
-# remove listed files that have either "_TEMP.tif" or "dem" in the name
-rast_data <- grep("_TEMP.tif|dem", rast_data, value = TRUE, invert = TRUE)
+# remove listed files that have "dem" in the name
+rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
 
-# THIS IS TEMPORARY UNTIL THE LAYERS ARE FIXED: currently, the TPI, 
-# openness_pos, and openness_neg files are not the correct files, so remove
-# those as well:
-rast_data <- grep("openness_|tpi.tif", rast_data, value = TRUE, invert = TRUE)
+# load those files as SpatRaster objects
+rasters <- rast(rast_files)
+rasters
+plot(rasters)
 
-sk_raster <- rast(rast_data)
-sk_raster
-plot(sk_raster)
+## load vector data & read in sf dataframe
+ldb_sk_poly <- st_read("LDB_SK.gpkg") %>% 
+  mutate(ID = row_number(), sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
+ldb_sk_poly
 
-##load vector data & read in sf dataframe 
-vect_data <-system.file("extdata", "LDB_SK.gpkg", package = "mlr3spatial") ##wrong?
-vect_data <- c(table_join, vector, package="mlr3spatial") ##use
-sk_vector <- st_read(vect_data, stringsAsFactors = TRUE)
-sk_vector
+#########
+vectors <- vect(ldb_sk_poly)
 
-##target is what is predicted
-tsk_sk <- as_task_classif_st(sk_vector, target = "sk_pres")
-tsk_sk
+# Perform data extraction
+extraction <- terra::extract(rasters, vectors, ID = TRUE, xy = TRUE) %>% 
+  na.omit() %>% 
+  st_as_sf(coords = c("x", "y"), crs = st_crs(vectors))
+
+# Join the extracted data with the original dataset
+extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
+  select(-ID) %>% 
+  arrange(sk_pres) %>% 
+  distinct(across(names(rasters)), .keep_all = TRUE) %>% 
+  slice_sample(prop = 1)
+
+```
+
+Read files in\
+points/polygons & raster imagery\
+Question #6: extract value of raster at each point/line/polygon
+
+```{r}
+
+##start here
+task_sk <- as_task_classif_st(
+  extraction_join, target = "sk_pres", positive = "TRUE")
+task_sk
 ##created task
+
 
 ```
 
 Simple random forest learner
 
 ```{r}
-lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 2) ##edit mtry
+lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
 lrn_rf
 
 
@@ -76,8 +104,8 @@ Train the learner using task data
 ```{r}
 
 lrn_rf_tune <- lrn("classif.ranger", 
-                   num.trees = to_tune(100, 2000), predict_type = "response??",
-                   mtry = to_tune(1, length(tsk_sk$feature_names??)),
+                   num.trees = to_tune(100, 2000), predict_type = "response",
+                   mtry = to_tune(1, length(task_sk$feature_names)),
                    importance = "impurity")
 
 ```
@@ -88,7 +116,7 @@ Tuner design: Set up how the 'to_tune()' function will work
 
 df_design <- expand.grid(
   num.trees = c(100, 250, 500, 750, 1000, 1500, 2000),
-  mtry = 1:length(tsk_sk$feature_names))
+  mtry = 1:length(task_sk$feature_names))
 
 dt_design <- data.table(df_design)
 
@@ -151,10 +179,9 @@ Run Probability model
 # Probability learner
 lrn_rf_tune_prob <- lrn("classif.ranger", 
                         num.trees = to_tune(100, 2000), predict_type = "prob",
-                        mtry = to_tune(1, length(tsk_sk$feature_names)),
+                        mtry = to_tune(1, length(task_sk$feature_names)),
                         importance = "impurity")
 
-##??
 avail_msrs <- as.data.table(msrs())[
   task_type == "classif" & 
     predict_type == "prob" &
@@ -172,8 +199,12 @@ at_prob <- auto_tuner(
   measure = msr("classif.logloss"),
   terminator = trm("evals", n_evals = 5)
 )
+##??
+rr_prob <- resample(task_sk, at_prob, cv_outer, store_models = TRUE)
+##Error in (function (classes, fdef, mtable)  : 
+##unable to find an inherited method for function ‘resample’ for signature ##‘"TaskClassifST", "AutoTuner"’
+?resample
 
-rr_prob <- resample(tsk_sk, at_prob, cv_outer, store_models = TRUE)
 
 # Aggregate the final data to generate an overall score:
 rr_prob$aggregate(msrs(useful_msrs))
