@@ -40,6 +40,7 @@ Q#5
 ```{r}
 
 library(sf)
+library(sfheaders)
 library(dplyr)
 
 ##load raster data
@@ -53,10 +54,26 @@ rasters <- rast(rast_files)
 rasters
 plot(rasters)
 
-## load vector data & read in sf dataframe
-ldb_sk_poly <- st_read("LDB_SK.gpkg") %>% 
+# Create outline of raster area
+single_rast <- rasters[[1]]*0
+rast_outline <- as.polygons(single_rast) %>%
+  st_as_sf() %>% 
+  sf_remove_holes() %>%
+  st_geometry()
+
+## load vector data & read in sf dataframe, clip it to the raster outline
+ldb_sk_poly <- st_read("LDB_SK.gpkg") %>%
+  st_set_agr("constant") %>%
+  st_intersection(rast_outline)
+
+# "absent" polygons overlap with "present" polygons. This will confuse the model.
+# Clip the absent polygons using the present polygons to prevent that confusion.
+ldb_sk_present <- ldb_sk_poly |> filter(sk_pres)
+ldb_sk_absent <- ldb_sk_poly |> filter(!sk_pres)
+ldb_present_union <- st_union(ldb_sk_present)
+ldb_sk_absent_clip <- st_difference(ldb_sk_absent, ldb_present_union)
+ldb_sk_poly <- rbind(ldb_sk_present, ldb_sk_absent_clip) |> 
   mutate(sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
-ldb_sk_poly
 
 #########
 vectors <- vect(ldb_sk_poly)
