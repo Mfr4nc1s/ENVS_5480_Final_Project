@@ -43,7 +43,7 @@ library(sf)
 library(dplyr)
 
 ##load raster data
-rast_files <- list.files("5m", pattern = ".tif", full.names = TRUE)
+rast_files <- list.files("ta/5m", pattern = ".tif", full.names = TRUE)
 
 # remove listed files that have "dem" in the name
 rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
@@ -55,23 +55,31 @@ plot(rasters)
 
 ## load vector data & read in sf dataframe
 ldb_sk_poly <- st_read("LDB_SK.gpkg") %>% 
-  mutate(ID = row_number(), sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
+  mutate(sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
 ldb_sk_poly
 
 #########
 vectors <- vect(ldb_sk_poly)
 
 # Perform data extraction
-extraction <- terra::extract(rasters, vectors, ID = TRUE, xy = TRUE) %>% 
-  na.omit() %>% 
-  st_as_sf(coords = c("x", "y"), crs = st_crs(vectors))
+
+### Changing this to use the middle of the polygon instead of getting all 
+### points in the polygon - all points was way too much data to work with
+extraction <- terra::extract(
+  rasters, vectors, fun = mean, na.rm = TRUE, bind = TRUE, ID = FALSE) %>% 
+  st_as_sf() %>%
+  na.omit() %>%
+  st_set_agr("constant") %>%
+  st_centroid()
 
 # Join the extracted data with the original dataset
-extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
-  select(-ID) %>% 
-  arrange(sk_pres) %>% 
-  distinct(across(names(rasters)), .keep_all = TRUE) %>% 
-  slice_sample(prop = 1)
+
+### Don't need this anymore now that we are using point data
+# extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
+#   select(-ID) %>% 
+#   arrange(sk_pres) %>% 
+#   distinct(across(names(rasters)), .keep_all = TRUE) %>% 
+#   slice_sample(prop = 1)
 
 ```
 
@@ -80,15 +88,14 @@ points/polygons & raster imagery\
 Question #6: extract value of raster at each point/line/polygon
 
 ```{r}
-extraction_join = subset(extraction_join, select = -c(SITE_CREATED_DATE)) 
+# extraction_join = subset(extraction_join, select = -c(SITE_CREATED_DATE)) 
 #Maybe this was just me but I had to remove the date column
 #in order to run the task line below
 
 ##start here
 
 
-task_sk <- as_task_classif_st(
-  extraction_join, target = "sk_pres", positive = "TRUE")
+task_sk <- as_task_classif_st(extraction, target = "sk_pres", positive = "TRUE")
 task_sk
 ##created task
 
@@ -98,9 +105,8 @@ task_sk
 Simple random forest learner
 
 ```{r}
-lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
-lrn_rf
-
+# lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
+# lrn_rf
 
 ```
 
@@ -108,10 +114,10 @@ Train the learner using task data
 
 ```{r}
 
-lrn_rf_tune <- lrn("classif.ranger", 
-                   num.trees = to_tune(100, 2000), predict_type = "response",
-                   mtry = to_tune(1, length(task_sk$feature_names)),
-                   importance = "impurity")
+# lrn_rf_tune <- lrn("classif.ranger", 
+#                    num.trees = to_tune(100, 2000), predict_type = "response",
+#                    mtry = to_tune(1, length(task_sk$feature_names)),
+#                    importance = "impurity")
 
 ```
 
@@ -136,14 +142,14 @@ Cross Validation
 cv_inner <- rsmp("cv", folds = 10)
 cv_outer <- rsmp("spcv_coords", folds = 4)
 
-##autotuner object
-at <- auto_tuner(
-  tuner = tnr_design,
-  learner = lrn_rf_tune,
-  resampling = cv_inner,
-  measure = msr("classif.ce"),
-  terminator = trm("none")
-)
+# ##autotuner object
+# at <- auto_tuner(
+#   tuner = tnr_design,
+#   learner = lrn_rf_tune,
+#   resampling = cv_inner,
+#   measure = msr("classif.ce"),
+#   terminator = trm("none")
+# )
 
 ```
 
@@ -151,14 +157,14 @@ Parallelizing
 
 ```{r}
 
-plan(multisession)
-
-plan(list("sequential", "multisession"))
-
-plan(list(
-  tweak("multisession", workers = 2),
-  tweak("multisession", workers = availableCores() / 2)
-))
+# plan(multisession)
+# 
+# plan(list("sequential", "multisession"))
+# 
+# plan(list(
+#   tweak("multisession", workers = 2),
+#   tweak("multisession", workers = availableCores() / 2)
+# ))
 
 ```
 
@@ -180,8 +186,8 @@ plan(list(
 Troubleshooting
 
 ```{r}
-task_sk$missings()
-lrn("classif.ranger")$properties
+# task_sk$missings()
+# lrn("classif.ranger")$properties
 
 ```
 
@@ -198,18 +204,19 @@ lrn_rf_tune_prob <- lrn("classif.ranger",
 avail_msrs <- as.data.table(msrs())[
   task_type == "classif" & 
     predict_type == "prob" &
-    task_properties != "twoclass"]
+    task_properties == "twoclass"] # it is twoclass: only TRUE/FALSE as response
 
 View(avail_msrs)
 
-useful_msrs <- c("classif.logloss", "classif.mbrier")
+# useful_msrs <- c("classif.logloss", "classif.mbrier")
+useful_msrs <- c("classif.auc", "classif.bbrier")
 
 # Create the auto_tuner object
 at_prob <- auto_tuner(
   tuner = tnr_design,
   learner = lrn_rf_tune_prob,
   resampling = cv_inner,
-  measure = msr("classif.logloss"),
+  measure = msr("classif.auc"),
   terminator = trm("evals", n_evals = 5)
 )
 
