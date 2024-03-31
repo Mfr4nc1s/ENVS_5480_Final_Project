@@ -44,7 +44,7 @@ library(sfheaders)
 library(dplyr)
 
 ##load raster data
-rast_files <- list.files("ta/5m", pattern = ".tif", full.names = TRUE)
+rast_files <- list.files("5m", pattern = ".tif", full.names = TRUE)
 
 # remove listed files that have "dem" in the name
 rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
@@ -87,7 +87,7 @@ extraction <- terra::extract(
   st_as_sf() %>%
   na.omit() %>%
   st_set_agr("constant") %>%
-  st_centroid()
+  st_centroid(of_largest_polygon = TRUE)
 
 # Join the extracted data with the original dataset
 
@@ -265,7 +265,11 @@ msr("classif.logloss")
 msr("classif.mbrier")
 
 # Choosing model based on lowest log loss values:
-best_lrn_prob <- rr_prob$learners[[which.min(mod_scores_prob$classif.logloss)]]$learner
+#best_lrn_prob <- rr_prob$learners[[which.min(mod_scores_prob$classif.logloss)]]$learner
+
+#No classif.logloss in mod_scores_prob has to either be 
+#classif.auc (want max) or classic.bbrier (want min)
+best_lrn_prob <- rr_prob$learners[[which.max(mod_scores_prob$classif.auc)]]$learner
 
 # Variable importance of the best learner
 imp <- best_lrn_prob$importance()
@@ -298,15 +302,21 @@ plan(multisession)
 best_lrn_prob$parallel_predict <- TRUE
 
 # Generate map prediction
-prediction_prob <- predict_spatial(sk_raster, best_lrn_prob)
-plot(prediction_prob)
+#prediction_prob <- predict_spatial(sk_raster, best_lrn_prob)
+#plot(prediction_prob)
+
+## sk_raster does not exist, should be rasters
+## ??
+
+prediction_prob <- predict_spatial(rasters, best_lrn_prob)
 
 # Workaround for probability prediction
 ranger_model <- best_lrn_prob$model
 fun <- function(model, ...) predict(model, ...)$predictions
+#prediction_prob_terra <- terra::predict(
+#  sk_raster, ranger_model, fun = fun, na.rm = TRUE)
 prediction_prob_terra <- terra::predict(
-  sk_raster, ranger_model, fun = fun, na.rm = TRUE)
-
+  rasters, ranger_model, fun = fun, na.rm = TRUE)
 plot(prediction_prob_terra)
 
 # Check, sum to 1
@@ -333,6 +343,7 @@ Map Predictions
 Raster image of predictions
 
 ```{r}
+## I think we need to create a regression learner for this?
 
 # Set up parallel environment:
 plan(multisession)
