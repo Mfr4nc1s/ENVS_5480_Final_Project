@@ -193,8 +193,6 @@ saga_remove_tmpfiles()
 Data extraction (copy/pasted from the project instructions):
 
 ```{r}
-library(sf)
-library(terra)
 
 ##load raster data
 ## list all files with a .tif extension in the ta/DEMs folder
@@ -346,7 +344,9 @@ points/polygons & raster imagery\
 Question #6: extract value of raster at each point/line/polygon
 
 ```{r}
-
+library(mlr3verse)
+library(mlr3spatial)
+library(mlr3spatiotempcv)
 ##start here
 task_sk <- as_task_classif_st(extraction, target = "sk_pres", positive = "TRUE")
 task_sk
@@ -358,8 +358,8 @@ task_sk
 Simple random forest learner
 
 ```{r}
-lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
-lrn_rf
+# lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
+# lrn_rf
 
 
 ```
@@ -368,10 +368,10 @@ Train the learner using task data
 
 ```{r}
 
-lrn_rf_tune <- lrn("classif.ranger", 
-                   num.trees = to_tune(100, 2000), predict_type = "response",
-                   mtry = to_tune(1, length(task_sk$feature_names)),
-                   importance = "impurity")
+# lrn_rf_tune <- lrn("classif.ranger",
+#                    num.trees = to_tune(100, 2000), predict_type = "response",
+#                    mtry = to_tune(1, length(task_sk$feature_names)),
+#                    importance = "impurity")
 
 ```
 
@@ -396,13 +396,13 @@ cv_inner <- rsmp("cv", folds = 10)
 cv_outer <- rsmp("spcv_coords", folds = 4)
 
 ##autotuner object
-at <- auto_tuner(
-  tuner = tnr_design,
-  learner = lrn_rf_tune,
-  resampling = cv_inner,
-  measure = msr("classif.ce"),
-  terminator = trm("none")
-)
+# at <- auto_tuner(
+#   tuner = tnr_design,
+#   learner = lrn_rf_tune,
+#   resampling = cv_inner,
+#   measure = msr("classif.ce"),
+#   terminator = trm("none")
+# )
 
 ```
 
@@ -457,7 +457,7 @@ lrn_rf_tune_prob <- lrn("classif.ranger",
 avail_msrs <- as.data.table(msrs())[
   task_type == "classif" & 
     predict_type == "prob" &
-    task_properties != "twoclass"] # it is twoclass: only TRUE/FALSE as response
+    task_properties == "twoclass"] # it is twoclass: only TRUE/FALSE as response
 
 View(avail_msrs)
 
@@ -470,7 +470,7 @@ at_prob <- auto_tuner(
   learner = lrn_rf_tune_prob,
   resampling = cv_inner,
   measure = msr("classif.auc"),
-  terminator = trm("evals", n_evals = 5)
+  terminator = trm("none")
 )
 
 rr_prob <- resample(task_sk, at_prob, cv_outer, store_models = TRUE)
