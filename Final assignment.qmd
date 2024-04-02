@@ -33,12 +33,13 @@ opt_output_files(las_ctg) <- "01_retile/{XLEFT}_{YBOTTOM}"
 
 ##Chunk size and buffer size:
 
-opt_chunk_size(las_ctg) <- 250
+opt_chunk_size(las_ctg) <- 500
 opt_chunk_buffer(las_ctg) <- 0
 
 ##Chunk alignment
 
-opt_chunk_alignment(las_ctg) <- c(250, 250)
+
+opt_chunk_alignment(las_ctg) <- c(500, 500)
 plot(las_ctg, chunk_pattern = TRUE)
 
 ##retile
@@ -71,37 +72,43 @@ opt_output_files(ctg_tiled) <- "02_ground/{*}"
 
 ctg_ground <- classify_ground(ctg_tiled, algorithm = csf(sloop_smooth = TRUE))
 opt_output_files(ctg_ground) <- ""
-dem <- rasterize_terrain(ctg_ground, res = 1, algorithm = tin())
+dem <- rasterize_terrain(ctg_ground, res = 5, algorithm = tin())
 
 ##Create a new folder called "ta" to hold all of the files used for terrain
 ##analysis:
 
-dir.create("ta", showWarnings = FALSE)
-dem <- writeRaster(dem, "ta/dem.tif", overwrite = TRUE)
+
+dir.create("ta/5m", showWarnings = FALSE)
+dem <- writeRaster(dem, "ta/5m/dem.tif", overwrite = TRUE)
 ```
 
 ```{r}
 library(terra)
 library(mapview)
 
+
 dem <- rast("DEMs/dem.tif")
 plot(dem)
+
 
 #mapview(dem)
 
 
 ## extract terrain layers
+
 ## reminder to change path back to microsoft
 ##
 ##saga_path <- "C:/Users/T00629284/OneDrive - Thompson Rivers University/Desktop/saga-9.3.2_x64/saga_cmd.exe"
 
 saga_path <- ("/Applications/SAGA.app/Contents/MacOS/saga_cmd")
+
 saga <- saga_gis(saga_path, raster_format = "GeoTIFF")
 #dem = rast("ta/dem.tif")
  
 dem_preproc <- saga$ta_preprocessor$sink_removal(
   dem = dem, 
-  dem_preproc = "DEMs/dem_preproc.tif",
+
+  dem_preproc = "ta/5m/dem_preproc.tif",
   #dem_preproc = "ta/dem_preproc.tif"
   )
 
@@ -117,8 +124,9 @@ View(tidy(saga$ta_morphometry$slope_aspect_curvature))
  
 slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
   elevation = dem_preproc, 
-  slope = "DEMs/slope.tif", 
-  aspect = "DEMs/aspect.tif", 
+
+  slope = "ta/5m/slope.tif", 
+  aspect = "ta/5m/aspect.tif", 
   method = 6, 
   unit_slope = "radians", 
   unit_aspect = "radians",
@@ -130,33 +138,36 @@ slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
 mrvbf_thresh <- mrvbf_threshold(res = res(dem)[1])
 mrvbf <- saga$ta_morphometry$multiresolution_index_of_valley_bottom_flatness_mrvbf(
   dem = dem_preproc, 
-  mrvbf = "DEMs/mrvbf.tif",
-  mrrtf = "DEMs/mrrtf.tif", 
+
+  mrvbf = "ta/5m/mrvbf.tif",
+  mrrtf = "ta/5m/mrrtf.tif", 
   t_slope = mrvbf_thresh
   )
 
 ## determine TRI
  
 tri <- saga$ta_morphometry$terrain_ruggedness_index_tri(
-  dem = dem_preproc, tri = "DEMs/tri.tif")
+
+  dem = dem_preproc, tri = "ta/5m/tri.tif")
 
 ##  determine TWI
  
 tca <- saga$ta_hydrology$flow_accumulation_top_down(
-  elevation = dem_preproc, flow = "DEMs/tca_TEMP.tif", .all_outputs = FALSE)
- 
 
+  elevation = dem_preproc, flow = "ta/5m/tca_TEMP.tif", .all_outputs = FALSE)
+ 
 sca <- saga$ta_hydrology$flow_width_and_specific_catchment_area(
-  dem = dem_preproc, tca = tca, sca = "DEMs/sca_TEMP.tif", .all_outputs = FALSE)
+  dem = dem_preproc, tca = tca, sca = "ta/5m/sca_TEMP.tif", .all_outputs = FALSE)
  
 twi <- saga$ta_hydrology$topographic_wetness_index(
-  slope = slope_aspect$slope, area = sca, twi = "DEMs/twi.tif")
+  slope = slope_aspect$slope, area = sca, twi = "ta/5m/twi.tif")
 
 ## determine TPI
 
 tpi <- saga$ta_morphometry$topographic_position_index_tpi(
   dem = dem_preproc, 
-  tpi = "DEMs/tpi.tif"
+
+  tpi = "ta/5m/tpi.tif"
 )
 
 ## determine topographic openess
@@ -164,21 +175,91 @@ tpi <- saga$ta_morphometry$topographic_position_index_tpi(
 # Topographic openness
 openness <- saga$ta_lighting$topographic_openness(
   dem = dem_preproc, 
-  pos = "DEMs/openness_pos.tif", 
-  neg = "DEMs/openness_neg.tif"
+  pos = "ta/5m/openness_pos.tif", 
+  neg = "ta/5m/openness_neg.tif"
   )
+
+# Remove files
+files_to_remove <- list.files("ta/5m", pattern = "_TEMP.tif", full.names = TRUE)
+file.remove(files_to_remove)
+saga_remove_tmpfiles()
 
 ```
 
-Question 5.
+```{r}
+## determine canopy height model
+```
+
+Data extraction (copy/pasted from the project instructions):
 
 ```{r}
-model_layers <- c(slope_aspect$slope, slope_aspect$aspect, mrvbf$mrvbf, mrvbf$mrrf, tri, twi, tpi, openness$pos, openness$neg)
+library(sf)
+library(terra)
 
-poly <- st_read("LDB_SK.gpkg") %>% mutate(ID=row_number())
-vector <- vect(poly)
+##load raster data
+## list all files with a .tif extension in the ta/DEMs folder
+rast_files <- list.files("ta/5m", pattern = ".tif", full.names = TRUE)
 
-extract_data <- terra::extract(model_layers, vector, ID=TRUE, RAW = TRUE) %>% as.data.frame()
+# remove listed files that have "dem" in the name
+rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
 
-table_join <- left_join(poly, extract_data, by="ID")
+# load those files as SpatRaster objects
+rasters <- rast(rast_files)
+rasters
+plot(rasters)
+
+## load vector data & read in sf dataframe
+## Adding a line here to create an ID column (identifies each individual polygon) 
+## as well as changing the "sk_pres" column to be a factor
+ldb_sk_poly <- st_read("LDB_SK.gpkg") %>% 
+  mutate(ID = row_number(), sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
+ldb_sk_poly
+
+#########
+#########
+
+## Below is what you need for data extraction. I did originally have this in 
+## your project outline; however I realized after the fact that the 
+## as_task_classif_st function (a bit further below) can only handle point data, 
+## not polygons, so use the below  instead of what was in the word doc:
+vectors <- vect(ldb_sk_poly)
+
+# Perform data extraction, add an ID, x, and y column. Then, remove any rows
+# containing NA values, then convert it to an sf object (much easier to work
+# with and is required for the modelling)
+extraction <- terra::extract(rasters, vectors, ID = TRUE, xy = TRUE) %>% 
+  na.omit() %>% 
+  st_as_sf(coords = c("x", "y"), crs = st_crs(vectors))
+
+# Join the extracted data with the original dataset so that the ID's can be 
+# translated to tell us whether the point has spotted knapweed in it or not.
+# Then, remove the ID column, sort the data by presence or absence, and then
+# remove duplicated points with the distinct function. Points can be duplicated
+# when any two (or more) polygons overlap with each other. Finally, randomize
+# the rows using slice_sample (not shown in class, just adds extra layer of 
+# randomization for modelling purposes)
+extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
+  select(-ID) %>% 
+  arrange(sk_pres) %>% 
+  distinct(across(names(rasters)), .keep_all = TRUE) %>% 
+  slice_sample(prop = 1)
+
+```
+
+Modelling
+
+```{r}
+
+library(mlr3verse)
+library(mlr3spatial)
+library(mlr3spatiotempcv)
+
+##land_cover is what is predicted....change for our project, but what do I change it to?
+# Use the "sk_pres" column, and use the "positive = TRUE" for the task itself.
+# I didn't go over that in class at all, all this does is help resolve any 
+# "ties" when classifying a point as either present (TRUE) or absent (FALSE). 
+# Defining positive = "TRUE" will classify any ties as present (TRUE).
+sk_task <- as_task_classif_st(
+  extraction_join, target = "sk_pres", positive = "TRUE")
+sk_task
 ```
