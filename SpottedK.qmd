@@ -1,0 +1,371 @@
+---
+title: "SpottedK"
+format: html
+editor: visual
+---
+
+```{r}
+```
+
+#6
+
+```{r}
+
+library(remotes)
+library(tidyverse)
+library(ranger) 
+library(mlr3)
+library(mlr3verse)
+library(mlr3spatial)
+library(mlr3spatiotempcv)
+library(sf)
+library(terra, exclude = "resample")
+library(future)
+
+lgr::get_logger("mlr3")$set_threshold("warn")
+lgr::get_logger("bbotk")$set_threshold("warn")
+
+```
+
+Q#5
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+library(sf)
+library(sfheaders)
+library(dplyr)
+
+##load raster data
+rast_files <- list.files("5m", pattern = ".tif", full.names = TRUE)
+
+# remove listed files that have "dem" in the name
+rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
+
+# load those files as SpatRaster objects
+rasters <- rast(rast_files)
+rasters
+plot(rasters)
+
+# Create outline of raster area
+single_rast <- rasters[[1]]*0
+rast_outline <- as.polygons(single_rast) %>%
+  st_as_sf() %>% 
+  sf_remove_holes() %>%
+  st_geometry()
+
+## load vector data & read in sf dataframe, clip it to the raster outline
+ldb_sk_poly <- st_read("LDB_SK.gpkg") %>%
+  st_set_agr("constant") %>%
+  st_intersection(rast_outline)
+
+# "absent" polygons overlap with "present" polygons. This will confuse the model.
+# Clip the absent polygons using the present polygons to prevent that confusion.
+ldb_sk_present <- ldb_sk_poly |> filter(sk_pres)
+ldb_sk_absent <- ldb_sk_poly |> filter(!sk_pres)
+ldb_present_union <- st_union(ldb_sk_present)
+ldb_sk_absent_clip <- st_difference(ldb_sk_absent, ldb_present_union)
+ldb_sk_poly <- rbind(ldb_sk_present, ldb_sk_absent_clip) |> 
+  mutate(sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
+
+#########
+vectors <- vect(ldb_sk_poly)
+
+# Perform data extraction
+
+### Changing this to use the middle of the polygon instead of getting all 
+### points in the polygon - all points was way too much data to work with
+extraction <- terra::extract(
+  rasters, vectors, fun = mean, na.rm = TRUE, bind = TRUE, ID = FALSE) %>% 
+  st_as_sf() %>%
+  na.omit() %>%
+  st_set_agr("constant") %>%
+  st_centroid(of_largest_polygon = TRUE)
+
+# Join the extracted data with the original dataset
+
+### Don't need this anymore now that we are using point data
+# extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
+#   select(-ID) %>% 
+#   arrange(sk_pres) %>% 
+#   distinct(across(names(rasters)), .keep_all = TRUE) %>% 
+#   slice_sample(prop = 1)
+
+```
+
+Read files in\
+points/polygons & raster imagery\
+Question #6: extract value of raster at each point/line/polygon
+
+```{r}
+# extraction_join = subset(extraction_join, select = -c(SITE_CREATED_DATE)) 
+#Maybe this was just me but I had to remove the date column
+#in order to run the task line below
+
+##start here
+
+
+task_sk <- as_task_classif_st(extraction, target = "sk_pres", positive = "TRUE")
+task_sk
+##created task
+
+
+```
+
+Simple random forest learner
+
+```{r}
+# lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
+# lrn_rf
+
+```
+
+Train the learner using task data
+
+```{r}
+
+# lrn_rf_tune <- lrn("classif.ranger", 
+#                    num.trees = to_tune(100, 2000), predict_type = "response",
+#                    mtry = to_tune(1, length(task_sk$feature_names)),
+#                    importance = "impurity")
+
+```
+
+Tuner design: Set up how the 'to_tune()' function will work
+
+```{r}
+
+df_design <- expand.grid(
+  num.trees = c(100, 250, 500, 750, 1000, 1500, 2000),
+  mtry = 1:length(task_sk$feature_names))
+
+dt_design <- data.table(df_design)
+
+tnr_design <- tnr("design_points", design = dt_design)
+
+
+```
+
+Cross Validation
+
+```{r}
+cv_inner <- rsmp("cv", folds = 10)
+cv_outer <- rsmp("spcv_coords", folds = 4)
+
+# ##autotuner object
+# at <- auto_tuner(
+#   tuner = tnr_design,
+#   learner = lrn_rf_tune,
+#   resampling = cv_inner,
+#   measure = msr("classif.ce"),
+#   terminator = trm("none")
+# )
+
+```
+
+Parallelizing
+
+```{r}
+
+# plan(multisession)
+# 
+# plan(list("sequential", "multisession"))
+# 
+# plan(list(
+#   tweak("multisession", workers = 2),
+#   tweak("multisession", workers = availableCores() / 2)
+# ))
+
+```
+
+Cores
+
+```{r}
+
+outer_cores <- min(4, availableCores())
+inner_cores <- floor(availableCores() / outer_cores)
+
+plan(list(
+  tweak("multisession", workers = outer_cores),
+  tweak("multisession", workers = inner_cores)
+))
+
+
+```
+
+Troubleshooting
+
+```{r}
+# task_sk$missings()
+# lrn("classif.ranger")$properties
+
+```
+
+Run Probability model
+
+```{r}
+
+# Probability learner
+lrn_rf_tune_prob <- lrn("classif.ranger", 
+                        num.trees = to_tune(100, 2000), predict_type = "prob",
+                        mtry = to_tune(1, length(task_sk$feature_names)),
+                        importance = "impurity")
+
+avail_msrs <- as.data.table(msrs())[
+  task_type == "classif" & 
+    predict_type == "prob" &
+    task_properties == "twoclass"] # it is twoclass: only TRUE/FALSE as response
+
+View(avail_msrs)
+
+# useful_msrs <- c("classif.logloss", "classif.mbrier")
+useful_msrs <- c("classif.auc", "classif.bbrier")
+
+# Create the auto_tuner object
+at_prob <- auto_tuner(
+  tuner = tnr_design,
+  learner = lrn_rf_tune_prob,
+  resampling = cv_inner,
+  measure = msr("classif.auc"),
+  terminator = trm("evals", n_evals = 5)
+)
+
+
+
+##??
+rr_prob <- resample(task_sk, at_prob, cv_outer, store_models = TRUE)
+##Error in (function (classes, fdef, mtable)  : 
+##unable to find an inherited method for function ‘resample’ for signature ##‘"TaskClassifST", "AutoTuner"’
+
+
+
+?resample
+
+
+# Aggregate the final data to generate an overall score:
+rr_prob$aggregate(msrs(useful_msrs))
+
+# Aggregated confusion matrix:
+conf_prob <- rr_prob$prediction()$confusion
+conf_prob
+
+# Get best learner
+mod_scores_prob <- rr_prob$score(msrs(useful_msrs))
+View(mod_scores_prob)
+
+##what to minimize or maximize - want to maximixe accuracy (says true or false)
+msr("classif.logloss")
+msr("classif.mbrier")
+
+# Choosing model based on lowest log loss values:
+#best_lrn_prob <- rr_prob$learners[[which.min(mod_scores_prob$classif.logloss)]]$learner
+
+#No classif.logloss in mod_scores_prob has to either be 
+#classif.auc (want max) or classic.bbrier (want min)
+best_lrn_prob <- rr_prob$learners[[which.max(mod_scores_prob$classif.auc)]]$learner
+
+# Variable importance of the best learner
+imp <- best_lrn_prob$importance()
+imp <- data.frame(Variable = factor(names(imp), levels = rev(unique(names(imp)))),
+                  Importance = imp, row.names = NULL)
+
+# Plot that importance:
+imp_plot_prob <- ggplot(imp, aes(x = Importance, y = Variable)) + 
+  geom_bar(stat = "identity")
+
+imp_plot_prob
+
+# Write variable importance to .csv file:
+write.ftable(ftable(conf_prob), file = "confusion_matrix_prob.csv", sep = ",",
+             quote = FALSE)
+
+ggsave("Variable importance_prob.png", imp_plot_prob, width = 1920, height = 1440,
+       units = "px", dpi = 300)
+
+
+
+```
+
+Probability Prediction
+
+```{r}
+
+# Set up parallel environment:
+plan(multisession)
+best_lrn_prob$parallel_predict <- TRUE
+
+# Generate map prediction
+#prediction_prob <- predict_spatial(sk_raster, best_lrn_prob)
+#plot(prediction_prob)
+
+## sk_raster does not exist, should be rasters
+## ??
+
+prediction_prob <- predict_spatial(rasters, best_lrn_prob)
+
+# Workaround for probability prediction
+ranger_model <- best_lrn_prob$model
+fun <- function(model, ...) predict(model, ...)$predictions
+#prediction_prob_terra <- terra::predict(
+#  sk_raster, ranger_model, fun = fun, na.rm = TRUE)
+prediction_prob_terra <- terra::predict(
+  rasters, ranger_model, fun = fun, na.rm = TRUE)
+plot(prediction_prob_terra)
+
+# Check, sum to 1
+check <- app(prediction_prob_terra, fun = sum, na.rm = TRUE, 
+             cores = availableCores())
+
+plot(check, type = "classes")
+
+
+```
+
+Shannon Entropy
+
+```{r}
+
+entropy_step1 <- sapp(prediction_prob_terra, function(x) x * log(x))
+entropy_step2 <- -app(entropy_step1, fun = sum, cores = availableCores())
+plot(entropy_step2)
+
+```
+
+Map Predictions
+
+Raster image of predictions
+
+```{r}
+## I think we need to create a regression learner for this?
+
+# Set up parallel environment:
+plan(multisession)
+best_lrn_regr$parallel_predict <- TRUE
+
+# Generate map prediction
+prediction_regr <- predict_spatial(sk_raster, best_lrn_regr)
+plot(prediction_regr)
+
+
+```
+
+Writing Outputs
+
+```{r}
+
+prob_files <- paste0(names(prediction_prob_terra), "_probability.tif")
+prediction_prob_terra <- writeRaster(
+  prediction_prob_terra, prob_files, overwrite = TRUE)
+##saves a vector file of each as .tif
+
+# Also, write entropy layer:
+entropy_step2 <- writeRaster(entropy_step2, "entropy.tif", overwrite = TRUE)
+
+```

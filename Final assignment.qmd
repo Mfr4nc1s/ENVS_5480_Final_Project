@@ -38,6 +38,7 @@ opt_chunk_buffer(las_ctg) <- 0
 
 ##Chunk alignment
 
+
 opt_chunk_alignment(las_ctg) <- c(500, 500)
 plot(las_ctg, chunk_pattern = TRUE)
 
@@ -76,6 +77,7 @@ dem <- rasterize_terrain(ctg_ground, res = 5, algorithm = tin())
 ##Create a new folder called "ta" to hold all of the files used for terrain
 ##analysis:
 
+
 dir.create("ta/5m", showWarnings = FALSE)
 dem <- writeRaster(dem, "ta/5m/dem.tif", overwrite = TRUE)
 ```
@@ -84,20 +86,28 @@ dem <- writeRaster(dem, "ta/5m/dem.tif", overwrite = TRUE)
 library(terra)
 library(mapview)
 
-# dem <- rast("DEMs/dem.tif")
-# plot(dem)
+
+dem <- rast("DEMs/dem.tif")
+plot(dem)
+
 
 #mapview(dem)
 
 
 ## extract terrain layers
 
-saga_path <- "C:/SAGA-GIS/saga-9.3.2_x64/saga_cmd.exe"
+## reminder to change path back to microsoft
+##
+##saga_path <- "C:/Users/T00629284/OneDrive - Thompson Rivers University/Desktop/saga-9.3.2_x64/saga_cmd.exe"
+
+saga_path <- ("/Applications/SAGA.app/Contents/MacOS/saga_cmd")
+
 saga <- saga_gis(saga_path, raster_format = "GeoTIFF")
 #dem = rast("ta/dem.tif")
  
 dem_preproc <- saga$ta_preprocessor$sink_removal(
   dem = dem, 
+
   dem_preproc = "ta/5m/dem_preproc.tif",
   #dem_preproc = "ta/dem_preproc.tif"
   )
@@ -114,6 +124,7 @@ View(tidy(saga$ta_morphometry$slope_aspect_curvature))
  
 slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
   elevation = dem_preproc, 
+
   slope = "ta/5m/slope.tif", 
   aspect = "ta/5m/aspect.tif", 
   method = 6, 
@@ -127,6 +138,7 @@ slope_aspect <- saga$ta_morphometry$slope_aspect_curvature(
 mrvbf_thresh <- mrvbf_threshold(res = res(dem)[1])
 mrvbf <- saga$ta_morphometry$multiresolution_index_of_valley_bottom_flatness_mrvbf(
   dem = dem_preproc, 
+
   mrvbf = "ta/5m/mrvbf.tif",
   mrrtf = "ta/5m/mrrtf.tif", 
   t_slope = mrvbf_thresh
@@ -135,11 +147,13 @@ mrvbf <- saga$ta_morphometry$multiresolution_index_of_valley_bottom_flatness_mrv
 ## determine TRI
  
 tri <- saga$ta_morphometry$terrain_ruggedness_index_tri(
+
   dem = dem_preproc, tri = "ta/5m/tri.tif")
 
 ##  determine TWI
  
 tca <- saga$ta_hydrology$flow_accumulation_top_down(
+
   elevation = dem_preproc, flow = "ta/5m/tca_TEMP.tif", .all_outputs = FALSE)
  
 sca <- saga$ta_hydrology$flow_width_and_specific_catchment_area(
@@ -152,6 +166,7 @@ twi <- saga$ta_hydrology$topographic_wetness_index(
 
 tpi <- saga$ta_morphometry$topographic_position_index_tpi(
   dem = dem_preproc, 
+
   tpi = "ta/5m/tpi.tif"
 )
 
@@ -229,8 +244,6 @@ extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID
   distinct(across(names(rasters)), .keep_all = TRUE) %>% 
   slice_sample(prop = 1)
 
-#########
-#########
 ```
 
 Modelling
