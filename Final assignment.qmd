@@ -186,81 +186,7 @@ saga_remove_tmpfiles()
 
 ```
 
-```{r}
-## determine canopy height model
-```
-
-Data extraction (copy/pasted from the project instructions):
-
-```{r}
-
-##load raster data
-## list all files with a .tif extension in the ta/DEMs folder
-rast_files <- list.files("ta/5m", pattern = ".tif", full.names = TRUE)
-
-# remove listed files that have "dem" in the name
-rast_files <- grep("dem", rast_files, value = TRUE, invert = TRUE)
-
-# load those files as SpatRaster objects
-rasters <- rast(rast_files)
-rasters
-plot(rasters)
-
-## load vector data & read in sf dataframe
-## Adding a line here to create an ID column (identifies each individual polygon) 
-## as well as changing the "sk_pres" column to be a factor
-ldb_sk_poly <- st_read("LDB_SK.gpkg") %>% 
-  mutate(ID = row_number(), sk_pres = factor(sk_pres, levels = c(TRUE, FALSE)))
-ldb_sk_poly
-
-#########
-#########
-
-## Below is what you need for data extraction. I did originally have this in 
-## your project outline; however I realized after the fact that the 
-## as_task_classif_st function (a bit further below) can only handle point data, 
-## not polygons, so use the below  instead of what was in the word doc:
-vectors <- vect(ldb_sk_poly)
-
-# Perform data extraction, add an ID, x, and y column. Then, remove any rows
-# containing NA values, then convert it to an sf object (much easier to work
-# with and is required for the modelling)
-extraction <- terra::extract(rasters, vectors, ID = TRUE, xy = TRUE) %>% 
-  na.omit() %>% 
-  st_as_sf(coords = c("x", "y"), crs = st_crs(vectors))
-
-# Join the extracted data with the original dataset so that the ID's can be 
-# translated to tell us whether the point has spotted knapweed in it or not.
-# Then, remove the ID column, sort the data by presence or absence, and then
-# remove duplicated points with the distinct function. Points can be duplicated
-# when any two (or more) polygons overlap with each other. Finally, randomize
-# the rows using slice_sample (not shown in class, just adds extra layer of 
-# randomization for modelling purposes)
-extraction_join <- left_join(extraction, st_drop_geometry(ldb_sk_poly), by = "ID") %>%
-  select(-ID) %>% 
-  arrange(sk_pres) %>% 
-  distinct(across(names(rasters)), .keep_all = TRUE) %>% 
-  slice_sample(prop = 1)
-
-```
-
-Modelling
-
-```{r}
-
-library(mlr3verse)
-library(mlr3spatial)
-library(mlr3spatiotempcv)
-
-##land_cover is what is predicted....change for our project, but what do I change it to?
-# Use the "sk_pres" column, and use the "positive = TRUE" for the task itself.
-# I didn't go over that in class at all, all this does is help resolve any 
-# "ties" when classifying a point as either present (TRUE) or absent (FALSE). 
-# Defining positive = "TRUE" will classify any ties as present (TRUE).
-sk_task <- as_task_classif_st(
-  extraction_join, target = "sk_pres", positive = "TRUE")
-sk_task
-```
+Extraction & Modelling
 
 ```{r}
 
@@ -347,31 +273,12 @@ Question #6: extract value of raster at each point/line/polygon
 library(mlr3verse)
 library(mlr3spatial)
 library(mlr3spatiotempcv)
-##start here
+
+
 task_sk <- as_task_classif_st(extraction, target = "sk_pres", positive = "TRUE")
 task_sk
 ##created task
 
-
-```
-
-Simple random forest learner
-
-```{r}
-# lrn_rf <- lrn("classif.ranger", num.trees = 500, mtry = 3) ##edit mtry?
-# lrn_rf
-
-
-```
-
-Train the learner using task data
-
-```{r}
-
-# lrn_rf_tune <- lrn("classif.ranger",
-#                    num.trees = to_tune(100, 2000), predict_type = "response",
-#                    mtry = to_tune(1, length(task_sk$feature_names)),
-#                    importance = "impurity")
 
 ```
 
@@ -394,15 +301,6 @@ Cross Validation
 ```{r}
 cv_inner <- rsmp("cv", folds = 10)
 cv_outer <- rsmp("spcv_coords", folds = 4)
-
-##autotuner object
-# at <- auto_tuner(
-#   tuner = tnr_design,
-#   learner = lrn_rf_tune,
-#   resampling = cv_inner,
-#   measure = msr("classif.ce"),
-#   terminator = trm("none")
-# )
 
 ```
 
@@ -435,14 +333,6 @@ plan(list(
 
 ```
 
-Troubleshooting
-
-```{r}
-
-# task_sk$missings()
-# lrn("classif.ranger")$properties
-
-```
 
 Run Probability model
 
@@ -495,11 +385,10 @@ conf_prob
 mod_scores_prob <- rr_prob$score(msrs(useful_msrs))
 View(mod_scores_prob)
 
-##what to minimize or maximize - want to maximixe accuracy (says true or false)
-msr("classif.auc")     ##Minimize = False
-msr("classif.bbrier")  ##Minimize = True
+msr("classif.auc")     
+msr("classif.bbrier")  
 
-# Choosing model based on maximizinf classif.auc
+# Choosing model based on maximizing classif.auc
 best_lrn_prob <- rr_prob$learners[[which.max(mod_scores_prob$classif.auc)]]$learner
 
 # Variable importance of the best learner
