@@ -9,4 +9,5 @@ Jasmine Ehlert
 
 
 # code finished on April.04/2024
-# file name: Final assignment.qmd
+# file name of script: Final assignment.qmd
+# file name of report: Probability of finding spotted knapweed in Lac du Bois
